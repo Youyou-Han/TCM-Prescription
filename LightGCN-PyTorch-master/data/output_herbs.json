@@ -1,0 +1,197 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "ID": 771,
+      "name": "疮疹",
+      "value": 0.0,
+      "output_type": "graph",
+      "node_type": "symptom",
+      "dosage": 0.0,
+      "id": "疮疹"
+    },
+    {
+      "ID": 306,
+      "name": "腹泻",
+      "value": 0.0,
+      "output_type": "graph",
+      "node_type": "symptom",
+      "dosage": 0.0,
+      "id": "腹泻"
+    },
+    {
+      "ID": 1048,
+      "name": "甘草",
+      "value": 0.5961641073226929,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 9.5,
+      "id": "甘草"
+    },
+    {
+      "ID": 1254,
+      "name": "人参",
+      "value": 0.5665966868400574,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 3.0,
+      "id": "人参"
+    },
+    {
+      "ID": 277,
+      "name": "茯苓",
+      "value": 0.5660471320152283,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 8.0,
+      "id": "茯苓"
+    },
+    {
+      "ID": 922,
+      "name": "白术",
+      "value": 0.5624940395355225,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 9.0,
+      "id": "白术"
+    },
+    {
+      "ID": 1785,
+      "name": "当归",
+      "value": 0.5500179529190063,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 6.0,
+      "id": "当归"
+    },
+    {
+      "ID": 89,
+      "name": "防己",
+      "value": 0.5463611483573914,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 8.5,
+      "id": "防己"
+    },
+    {
+      "ID": 1906,
+      "name": "前胡",
+      "value": 0.5374900102615356,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 6.5,
+      "id": "前胡"
+    },
+    {
+      "ID": 452,
+      "name": "黄芩",
+      "value": 0.5232197046279907,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 3.0,
+      "id": "黄芩"
+    },
+    {
+      "ID": 1171,
+      "name": "黄连",
+      "value": 0.5229502320289612,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 2.0,
+      "id": "黄连"
+    },
+    {
+      "ID": 817,
+      "name": "白芍",
+      "value": 0.5184601545333862,
+      "output_type": "recommend",
+      "node_type": "herb",
+      "dosage": 15.0,
+      "id": "白芍"
+    }
+  ],
+  "links": [
+    {
+      "source": "疮疹",
+      "target": "甘草"
+    },
+    {
+      "source": "疮疹",
+      "target": "人参"
+    },
+    {
+      "source": "疮疹",
+      "target": "茯苓"
+    },
+    {
+      "source": "疮疹",
+      "target": "白术"
+    },
+    {
+      "source": "疮疹",
+      "target": "当归"
+    },
+    {
+      "source": "疮疹",
+      "target": "防己"
+    },
+    {
+      "source": "疮疹",
+      "target": "前胡"
+    },
+    {
+      "source": "疮疹",
+      "target": "黄芩"
+    },
+    {
+      "source": "疮疹",
+      "target": "黄连"
+    },
+    {
+      "source": "疮疹",
+      "target": "白芍"
+    },
+    {
+      "source": "腹泻",
+      "target": "甘草"
+    },
+    {
+      "source": "腹泻",
+      "target": "人参"
+    },
+    {
+      "source": "腹泻",
+      "target": "茯苓"
+    },
+    {
+      "source": "腹泻",
+      "target": "白术"
+    },
+    {
+      "source": "腹泻",
+      "target": "当归"
+    },
+    {
+      "source": "腹泻",
+      "target": "防己"
+    },
+    {
+      "source": "腹泻",
+      "target": "前胡"
+    },
+    {
+      "source": "腹泻",
+      "target": "黄芩"
+    },
+    {
+      "source": "腹泻",
+      "target": "黄连"
+    },
+    {
+      "source": "腹泻",
+      "target": "白芍"
+    }
+  ]
+}

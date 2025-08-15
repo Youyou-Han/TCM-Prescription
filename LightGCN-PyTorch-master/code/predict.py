@@ -20,8 +20,9 @@ from world import cprint
 import register
 from register import dataset
 from torch.nn.functional import cosine_similarity
-
-
+import networkx as nx
+from os.path import join
+import pandas as pd
 # =========================
 # 路径与基础配置（按需修改）
 # =========================
@@ -152,15 +153,6 @@ def load_safe_ranges() -> Dict[str, Tuple[float, float]]:
 
 SAFE_DOSAGE_RANGES = load_safe_ranges()
 
-# —— 同义词映射（加载完 SAFE_DOSAGE_RANGES 后进行）——
-ALIASES = {
-    "蛇黄": "雄黄",
-}
-for alias, main in ALIASES.items():
-    if main in SAFE_DOSAGE_RANGES and alias not in SAFE_DOSAGE_RANGES:
-        SAFE_DOSAGE_RANGES[alias] = SAFE_DOSAGE_RANGES[main]
-
-
 # =========================
 # LLM 加载（DeepSeek-R1-Distill-Qwen-1.5B）
 # =========================
@@ -204,18 +196,21 @@ def load_local_llm():
         return None, None
 
 
-# =========================
-# 逐味生成：提示 + 生成 + 数字前缀约束
-# =========================
 def _single_herb_prompt(symptoms: str, herb: str, lo: float, hi: float) -> str:
     return (
-        "你是严格按规范生成数值的助手。"
-        "只输出一个数字（克），保留1位小数，不要单位，不要任何解释，不要标点或空格。"
-        "数字必须在给定范围内。\n\n"
-        f"【症状】{symptoms}\n"
-        f"【草药】{herb}\n"
-        f"【剂量范围(克)】{lo}-{hi}\n"
-        "只输出数字（第一字符必须是0-9）："
+        "你是中医方药剂量推断助手。请在给定剂量范围内，依据辨证与配伍原则选择**最合理**的单味剂量。"
+        "你必须综合考虑：症状→证型→治法→方药配伍→本味药在方中的角色（君/臣/佐/使）、药性（四气五味、归经）、"
+        "药对与常见组方（如四君子汤、四物汤、清热解毒方等），以及常见禁忌与十八反/十九畏。"
+        "若症状信息不足，遵循“中量或略偏向量”的保守策略，并根据本味药是否可能担任君/臣/佐/使微调："
+        "君≈1.0×基准量，臣≈0.8×，佐≈0.6×，使≈0.4×（最后仍需落在给定范围）。"
+        "如处方中含与本味药相反相畏者，应相应下调或贴近下限；如协同药对明显（例如甘草-白芍/黄芩/大枣等），可适度上调。"
+        "默认成年非孕非儿科，无严重肝肾功能异常。注意：你**不能**超出给定范围。"
+        "\n\n"
+        f"【症状（原始）】{symptoms}\n"
+        f"【当前评估之单味草药】{herb}\n"
+        f"【允许的剂量范围(克)】{lo}-{hi}\n"
+        "请直接给出**唯一的阿拉伯数字**（克，保留1位小数），不要单位、不要任何解释或标点、不要空格，"
+        "第一字符必须是0-9。例如：6.5"
     )
 
 def _digit_token_ids(tokenizer):
@@ -370,10 +365,76 @@ def predict_dosages(symptoms: str, herb_list: List[str]) -> Dict[str, float]:
 def predict_dosage(symptoms: str, herb_name: str) -> float:
     return apply_safety_limits(get_safe_dosage(herb_name), herb_name)
 
+def _to_node_attrs(d):
+    """
+    规范化节点属性，确保包含：
+    ID / name / value / output_type / node_type / dosage
+    """
+    return {
+        "ID":        int(d.get("ID", 0)),
+        "name":      str(d.get("name", "")),
+        "value":     float(d.get("value", 0.0)),
+        "output_type": str(d.get("output_type", "recommend")),
+        "node_type":   str(d.get("node_type", "herb")),
+        "dosage":    float(d.get("dosage", 0.0)),
+    }
 
-# =========================
-# 主推荐流程（依赖你的 LightGCN 代码）
-# =========================
+def export_node_link_json(result_dict, output_path):
+    """
+    result_dict: predict() 生成的 result
+      {
+        "input_symptoms": "症状A,症状B",
+        "topk": 10,
+        "herbs": [ {ID,name,value,output_type,node_type,dosage}, ... ]
+      }
+    output_path: 例如 ../data/output_herbs.json
+    """
+    # 1) 载入词表，拿到 symptom / herb 的全量序（用于 ID 对齐）
+    vocab_file = join(world.FILE_PATH, "export", "vocab.json")
+    with open(vocab_file, "r", encoding="utf-8") as f:
+        vocab = json.load(f)
+    sym_names = vocab["symptoms"]
+    herb_names = vocab["herbs"]
+
+    # 2) 构图
+    G = nx.Graph()
+
+    # 2.1 加 symptom 节点
+    input_syms = [s.strip() for s in result_dict.get("input_symptoms", "").split(",") if s.strip()]
+    for s in input_syms:
+        if s in sym_names:
+            sid = sym_names.index(s) + 1   # 行号/索引对齐：1-based
+        else:
+            # 未登录词表的症状：给一个0或跳过，这里选择跳过以避免脏节点
+            continue
+        G.add_node(
+            s,
+            **_to_node_attrs({
+                "ID": sid, "name": s,
+                "value": 0.0,
+                "output_type": "graph",
+                "node_type": "symptom",
+                "dosage": 0.0
+            })
+        )
+
+    # 2.2 加 herb 节点
+    for h in result_dict.get("herbs", []):
+        G.add_node(h["name"], **_to_node_attrs(h))
+
+    # 2.3 加边：每个 symptom 与每个 herb 相连（无向）
+    for s in input_syms:
+        if s not in G:  # 过滤掉未加入的症状（如不在词表）
+            continue
+        for h in result_dict.get("herbs", []):
+            G.add_edge(s, h["name"])
+
+    # 3) 导出 node-link JSON
+    data = nx.node_link_data(G)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def predict(symptoms_input: str, top_k: int = 10) -> Dict[str, Any]:
     """
     根据症状输入预测草药（先召回/排序，再由 LLM 逐味生成剂量）
@@ -452,20 +513,94 @@ def predict(symptoms_input: str, top_k: int = 10) -> Dict[str, Any]:
             "node_type": "herb",
             "dosage": dosage
         })
+
+    out_path = join("..", "data", "output_herbs.json")
+    export_node_link_json(result, out_path)
+
     return result
 
+def symptom_input(xlsx_path: str = r"D:\Program Files\code\LightGCN-PyTorch-master\LightGCN-PyTorch-master\code\input_symptom.xlsx",
+                  top_k: int = 10,
+                  row: int = 0):
+    """
+    读取 Excel 第一列第 row 行：
+      - 如果是“空格/逗号分隔的编号（1-based）”，按编号解析；
+      - 如果不是编号，就按“症状名称（支持中文/英文逗号、空格、顿号分隔）”解析；
+    然后转成 predict() 需要的“逗号分隔的症状名”，调用现有流程。
+    最终 node-link JSON 的导出仍由 predict() 内部完成（../data/output_herbs.json）。
+    """
+    # 1) 载入词表
+    vocab_file = join(world.FILE_PATH, "export", "vocab.json")
+    with open(vocab_file, "r", encoding="utf-8") as f:
+        vocab = json.load(f)
+    sym_names = vocab["symptoms"]
+    N = len(sym_names)
 
-# =========================
-# CLI 入口
-# =========================
+    # 2) 读取 Excel 目标行
+    try:
+        df = pd.read_excel(xlsx_path, header=None, engine="openpyxl")
+    except Exception:
+        df = pd.read_excel(xlsx_path, header=None)
+    raw = df.iloc[row, 0] if row < len(df) else ""
+    s = "" if pd.isna(raw) else str(raw)
+
+    # 3) 统一分隔符（全角空格/中文逗号/英文逗号/顿号/制表符 -> 空格）
+    for bad, good in [("\u3000", " "), ("，", " "), (",", " "), ("、", " "), ("\t", " ")]:
+        s = s.replace(bad, good)
+    parts = [p for p in s.strip().split() if p]
+
+    # 4) 先尝试按“编号”解析（1-based → 0-based）
+    idx0 = []
+    if parts:
+        nums = []
+        for p in parts:
+            if p.isdigit():
+                nums.append(int(p))
+            else:
+                # 允许像 "12," 这种混入符号的情况
+                digits = "".join(ch for ch in p if ch.isdigit())
+                if digits:
+                    try:
+                        nums.append(int(digits))
+                    except Exception:
+                        pass
+        idx0 = [i - 1 for i in nums if 1 <= i <= N]
+
+    # 5) 若没解析出编号，则按“名称”解析
+    input_syms = []
+    if idx0:
+        input_syms = [sym_names[i] for i in idx0]
+        print(f"[symptom_input] 行 {row} 解析为编号: {[i+1 for i in idx0]}")
+    else:
+        # 名称模式：把 parts 当成症状名（已去除各种分隔符）
+        found, unknown = [], []
+        for token in parts:
+            if token in sym_names:
+                found.append(token)
+            else:
+                unknown.append(token)
+        input_syms = found
+        if unknown:
+            print(f"[symptom_input] 注意: 这些名称不在词表中，已忽略: {unknown}")
+        if not found:
+            print(f"[symptom_input] 错误: 第 {row} 行既不是有效编号，也没有匹配到任何症状名称。原始: {raw!r}")
+            return {"input_symptoms": "", "topk": top_k, "herbs": []}, join("..", "data", "output_herbs.json")
+
+        print(f"[symptom_input] 行 {row} 解析为名称: {found}")
+
+    symptoms_input = ",".join(input_syms)
+    result = predict(symptoms_input, top_k=top_k)
+    return result, join("..", "data", "output_herbs.json")
+
+
+
+
 if __name__ == "__main__":
     # 你的工程里这些全局在 world 内部使用
     world.dataset = "prescription"
     world.model_name = "lightgcn_cooccur"
 
-    symptoms = "疮疹,腹泻"
-    top_k = 10
-    res = predict(symptoms, top_k)
+    res, out_json = symptom_input("D:\Program Files\code\LightGCN-PyTorch-master\LightGCN-PyTorch-master\code\input_symptom.xlsx", top_k=10, row=0)
 
     print("\n推荐结果:")
     print(f"输入症状: {res['input_symptoms']}")
